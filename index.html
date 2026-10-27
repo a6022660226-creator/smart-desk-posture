@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>科展姿勢檢測系統（iPad 版）</title>
+    <title>科展姿勢檢測系統（支援隨時重新選擇慣用手）</title>
     <!-- 載入 MediaPipe Pose -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -15,18 +15,19 @@
             background-color: #121212;
             color: #ffffff;
             margin: 0;
-            padding: 15px;
+            padding: 10px;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
-        h1 { font-size: 1.3rem; margin-bottom: 5px; text-align: center; }
-        .subtitle { font-size: 0.8rem; color: #aaa; margin-bottom: 10px; text-align: center; }
+        h1 { font-size: 1.2rem; margin-bottom: 3px; text-align: center; }
+        .subtitle { font-size: 0.75rem; color: #aaa; margin-bottom: 8px; text-align: center; }
         
         .container {
             position: relative;
             width: 100%;
-            max-width: 600px;
+            max-width: 850px; 
+            aspect-ratio: 16 / 9;
             background: #000;
             border-radius: 10px;
             overflow: hidden;
@@ -37,7 +38,7 @@
         canvas {
             display: block;
             width: 100%;
-            height: auto;
+            height: 100%;
             transform: scaleX(-1); /* 水平鏡像 */
         }
         
@@ -46,53 +47,71 @@
             top: 10px;
             right: 10px;
             text-align: right;
-            font-size: 0.75rem;
+            font-size: 0.85rem;
             font-weight: bold;
             text-shadow: 1px 1px 2px black;
             pointer-events: none;
-        }
-        
-        .countdown-overlay {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 3.5rem;
-            font-weight: bold;
-            color: #00ffff;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-            display: none;
+            line-height: 1.4;
         }
 
-        .controls {
-            margin-top: 15px;
+        .input-group {
+            margin-top: 10px;
             display: flex;
-            gap: 10px;
+            gap: 12px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .input-group label {
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+
+        .input-group input, .input-group select {
+            padding: 8px 12px;
+            font-size: 0.95rem;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background-color: #222;
+            color: #fff;
+            text-align: center;
+        }
+        .input-group input { width: 150px; }
+        .input-group select { width: 140px; }
+
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
             flex-wrap: wrap;
             justify-content: center;
         }
 
         button {
-            padding: 10px 18px;
-            font-size: 0.95rem;
+            padding: 9px 16px;
+            font-size: 0.9rem;
             font-weight: bold;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             color: #fff;
         }
-        .btn-capture { background-color: #007aff; }
+        .btn-calib { background-color: #ff9500; }
+        .btn-start { background-color: #007aff; }
+        .btn-stop { background-color: #ff3b30; display: none; }
         .btn-csv { background-color: #34c759; }
+        button:disabled { background-color: #555; opacity: 0.6; cursor: not-allowed; }
 
         .log-box {
-            margin-top: 10px;
+            margin-top: 8px;
             width: 100%;
-            max-width: 600px;
+            max-width: 850px;
             background: #1e1e1e;
             padding: 8px;
             border-radius: 6px;
             font-size: 0.75rem;
-            max-height: 80px;
+            max-height: 90px;
             overflow-y: auto;
             color: #ccc;
         }
@@ -100,43 +119,101 @@
 </head>
 <body>
 
-    <h1>智慧型姿勢檢測系統</h1>
-    <div class="subtitle">iPad / 網頁版</div>
+    <h1>智慧型姿勢檢測系統（慣用手自由切換版）</h1>
+    <div class="subtitle">停止測試後可重新選擇慣用手與姓名 | 測試中可隨時重新校準 | 異常即發出嗶聲</div>
 
     <div class="container">
         <video id="webcam" autoplay playsinline muted></video>
-        <canvas id="output_canvas" width="640" height="480"></canvas>
+        <canvas id="output_canvas"></canvas>
         <div class="overlay-ui" id="statusText">初始化 AI 模型中...</div>
-        <div class="countdown-overlay" id="countdownDiv">3</div>
+    </div>
+
+    <!-- 學生設定區：姓名與慣用手 -->
+    <div class="input-group">
+        <div>
+            <label for="userName">受測者姓名/座號：</label>
+            <input type="text" id="userName" placeholder="例如：王小明" value="受測者">
+        </div>
+        <div>
+            <label for="handednessSelect">慣用手 / 側身方向：</label>
+            <select id="handednessSelect">
+                <option value="right" selected>右手 (側向左邊)</option>
+                <option value="left">左手 (側向右邊)</option>
+            </select>
+        </div>
     </div>
 
     <div class="controls">
-        <button class="btn-capture" id="captureBtn">📷 3秒倒數截圖</button>
-        <button class="btn-csv" id="downloadCsvBtn">📊 下載 CSV</button>
+        <button class="btn-calib" id="calibBtn">🎯 坐姿校準 (C)</button>
+        <button class="btn-start" id="startTestBtn" disabled>▶️ 開始測試</button>
+        <button class="btn-stop" id="stopTestBtn">⏹️ 停止測試</button>
+        <button class="btn-csv" id="downloadCsvBtn">📊 手動下載 CSV</button>
     </div>
 
-    <div class="log-box" id="logBox">系統日誌：等待啟動...</div>
+    <div class="log-box" id="logBox">系統日誌：請選擇慣用手，將 iPad 架在皮套上，輸入姓名後坐端正點擊「坐姿校準」。</div>
 
     <script>
         const videoElement = document.getElementById('webcam');
         const canvasElement = document.getElementById('output_canvas');
         const canvasCtx = canvasElement.getContext('2d');
         const statusText = document.getElementById('statusText');
-        const countdownDiv = document.getElementById('countdownDiv');
-        const captureBtn = document.getElementById('captureBtn');
+        const userNameInput = document.getElementById('userName');
+        const handednessSelect = document.getElementById('handednessSelect');
+        const calibBtn = document.getElementById('calibBtn');
+        const startTestBtn = document.getElementById('startTestBtn');
+        const stopTestBtn = document.getElementById('stopTestBtn');
         const downloadCsvBtn = document.getElementById('downloadCsvBtn');
         const logBox = document.getElementById('logBox');
 
-        let csvRecords = [["Timestamp", "Angle_A", "Status_A", "Angle_B", "Status_B", "Total_C", "Status_C"]];
-        let currentData = { a: 0, statusA: "Waiting", b: 0, statusB: "Waiting", c: 0, statusC: "Waiting" };
-        let isCountingDown = false;
+        let csvRecords = [["Timestamp", "Name", "Handedness", "Test_A_Diff", "Status_A", "Test_B_ShrungRatio", "Status_B", "Test_C_Score", "Status_C", "Overall_Result"]];
+        let currentData = { diffA: 0, statusA: "Waiting", ratioB: 0, statusB: "Waiting", scoreC: 0, statusC: "Waiting" };
+        
+        let baselineA = null;
+        let baselineEarShoulderDist = null;
+        let isCalibrated = false;
+        let isTesting = false;
+        let autoRecordTimer = null;
+
+        const THRESHOLD_A = 15.0; // 烏龜頸角度變化門檻
+        const THRESHOLD_B_SHRINK = 0.18; // 聳肩：耳肩距離縮短超過 18% 即視為聳肩
 
         function log(msg) {
             logBox.innerHTML += `<br>${msg}`;
             logBox.scrollTop = logBox.scrollHeight;
         }
 
-        // 初始化 MediaPipe
+        // 🔊 瀏覽器內建 Web Audio API 發出嗶聲警示音
+        function playBeepSound() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 音符
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.3);
+            } catch (e) {
+                console.log("音效播放失敗: ", e);
+            }
+        }
+
+        function getFormattedDateTime() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        }
+
         const pose = new Pose({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
         });
@@ -150,19 +227,20 @@
 
         pose.onResults(onResults);
 
-        // 使用標準 HTML5 視訊串流啟動相機（對 iPad 相容性最高）
         async function startCamera() {
             try {
                 log("正在請求相機權限...");
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+                    video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
                     audio: false
                 });
                 videoElement.srcObject = stream;
                 await videoElement.play();
-                log("相機啟動成功！開始偵測姿勢...");
-                
-                // 開始影格循環
+
+                canvasElement.width = videoElement.videoWidth || 1280;
+                canvasElement.height = videoElement.videoHeight || 720;
+
+                log(`相機啟動成功！`);
                 requestAnimationFrame(sendVideoFrame);
             } catch (err) {
                 log("【錯誤】無法啟動相機：" + err.message);
@@ -187,59 +265,278 @@
 
             if (results.poseLandmarks) {
                 const landmarks = results.poseLandmarks;
-                const ear = landmarks[8], shoulder = landmarks[12], hip = landmarks[24], nose = landmarks[0];
+                const nose = landmarks[0];
 
-                const ear_x = ear.x * w, ear_y = ear.y * h;
-                const shoulder_x = shoulder.x * w, shoulder_y = shoulder.y * h;
-                const hip_x = hip.x * w, hip_y = hip.y * h;
+                let activeEarIdx;
+                let activeShIdx;
+                if (handednessSelect.value === 'right') {
+                    activeEarIdx = 7;   // 左耳
+                    activeShIdx = 11;  // 左肩
+                } else {
+                    activeEarIdx = 8;   // 右耳
+                    activeShIdx = 12;  // 右肩
+                }
+
+                const activeEar = landmarks[activeEarIdx];
+                const activeSh = landmarks[activeShIdx];
+                
+                const leftEar = landmarks[7];
+                const rightEar = landmarks[8];
+                const leftShoulder = landmarks[11];
+                const rightShoulder = landmarks[12];
+
+                const ear_x = activeEar.x * w, ear_y = activeEar.y * h;
+                const sh_x = activeSh.x * w, sh_y = activeSh.y * h;
+                
+                const l_ear_x = leftEar.x * w, l_ear_y = leftEar.y * h;
+                const r_ear_x = rightEar.x * w, r_ear_y = rightEar.y * h;
+                const l_sh_x = leftShoulder.x * w, l_sh_y = leftShoulder.y * h;
+                const r_sh_x = rightShoulder.x * w, r_sh_y = rightShoulder.y * h;
                 const nose_x = nose.x * w, nose_y = nose.y * h;
 
-                // 簡單馬賽克
+                // 頭部馬賽克
                 let min_x = Math.min(nose_x, ear_x), max_x = Math.max(nose_x, ear_x);
-                let hx1 = Math.max(0, Math.floor(min_x - 30)), hx2 = Math.min(w, Math.ceil(max_x + 30));
+                let hx1 = Math.max(0, Math.floor(min_x - 50)), hx2 = Math.min(w, Math.ceil(max_x + 50));
                 let base_y = Math.min(nose_y, ear_y);
-                let hy1 = Math.max(0, Math.floor(base_y - 70)), hy2 = Math.min(h, Math.ceil(base_y + 60));
+                let hy1 = Math.max(0, Math.floor(base_y - 110)), hy2 = Math.min(h, Math.ceil(base_y + 90));
                 let fw = hx2 - hx1, fh = hy2 - hy1;
                 
                 if (fw > 0 && fh > 0) {
                     canvasCtx.imageSmoothingEnabled = false;
-                    canvasCtx.drawImage(canvasElement, hx1, hy1, fw, fh, hx1, hy1, 10, 10);
-                    canvasCtx.drawImage(canvasElement, hx1, hy1, 10, 10, hx1, hy1, fw, fh);
+                    canvasCtx.drawImage(canvasElement, hx1, hy1, fw, fh, hx1, hy1, 15, 15);
+                    canvasCtx.drawImage(canvasElement, hx1, hy1, 15, 15, hx1, hy1, fw, fh);
                     canvasCtx.imageSmoothingEnabled = true;
                 }
 
-                // 角度計算
-                let dx_a = ear_x - shoulder_x, dy_a = shoulder_y - ear_y;
-                let angle_A = Math.round((Math.atan2(Math.abs(dx_a), dy_a !== 0 ? Math.abs(dy_a) : 1) * 180 / Math.PI) * 10) / 10;
-                let status_A = angle_A < 15 ? "Normal" : "Warning";
+                let dx_a = ear_x - sh_x, dy_a = sh_y - ear_y;
+                let raw_angle_A = Math.atan2(Math.abs(dx_a), dy_a !== 0 ? Math.abs(dy_a) : 1) * 180 / Math.PI;
 
-                let dx_b = shoulder_x - hip_x, dy_b = hip_y - shoulder_y;
-                let angle_B = Math.round((Math.atan2(Math.abs(dx_b), dy_b !== 0 ? Math.abs(dy_b) : 1) * 180 / Math.PI) * 10) / 10;
-                let status_B = angle_B < 12 ? "Normal" : "Warning";
+                let currentEarShoulderDist = Math.abs(sh_y - ear_y);
 
-                let total_C = Math.round((angle_A + angle_B) * 10) / 10;
-                let status_C = total_C < 25 ? "Good" : "Bad";
+                // 🎨 繪製連線與標記
+                drawLine(l_ear_x, l_ear_y, r_ear_x, r_ear_y, "#ffff00", 2);
+                drawLine(l_sh_x, l_sh_y, r_sh_x, r_sh_y, "#ff00ff", 2);
+                drawLine(sh_x, sh_y, ear_x, ear_y, "#00ff00", 3);
+                drawLine(sh_x, sh_y, sh_x, sh_y - 100, "#ffffff", 1);
 
-                currentData = { a: angle_A, statusA: status_A, b: angle_B, statusB: status_B, c: total_C, statusC: status_C };
+                drawCircle(l_ear_x, l_ear_y, 7, "#ffff00");
+                drawCircle(r_ear_x, r_ear_y, 7, "#ffff00");
+                drawCircle(l_sh_x, l_sh_y, 8, "#ff00ff");
+                drawCircle(r_sh_x, r_sh_y, 8, "#ff00ff");
 
-                // 畫點與線
-                drawCircle(ear_x, ear_y, "#ff0000");
-                drawCircle(shoulder_x, shoulder_y, "#0000ff");
-                drawCircle(hip_x, hip_y, "#00ffff");
-                drawLine(shoulder_x, shoulder_y, ear_x, ear_y, "#00ff00", 2);
-                drawLine(hip_x, hip_y, shoulder_x, shoulder_y, "#ff00ff", 2);
+                if (!isCalibrated) {
+                    statusText.innerHTML = `<span style="color:#ffcc00; font-size:1.1rem;">請確認慣用手，坐端正後點擊校準</span>`;
+                    window.tempA = raw_angle_A;
+                    window.tempDistB = currentEarShoulderDist;
+                } else {
+                    let diff_A = Math.round((raw_angle_A - baselineA) * 10) / 10;
+                    
+                    let shrinkRatio = (baselineEarShoulderDist - currentEarShoulderDist) / baselineEarShoulderDist;
+                    let shrinkPercent = Math.round(shrinkRatio * 100);
 
-                statusText.innerHTML = `[A] Ear-Shd: ${angle_A}°<br>[B] Shd-Hip: ${angle_B}°<br>[C] Total: ${total_C}°`;
+                    let status_A = "Normal";
+                    if (diff_A >= THRESHOLD_A) {
+                        status_A = "Warning (烏龜頸)";
+                    }
+
+                    let status_B = "Normal";
+                    if (shrinkRatio >= THRESHOLD_B_SHRINK) {
+                        status_B = "Warning (聳肩)";
+                    }
+                    
+                    let isBadC = false;
+                    if (status_A.includes("Warning") || status_B.includes("Warning")) {
+                        isBadC = true;
+                    }
+
+                    let status_C = "Good (良好)";
+                    if (isBadC) {
+                        status_C = "Bad (姿勢不良)";
+                    }
+
+                    currentData = { 
+                        diffA: diff_A, 
+                        statusA: status_A, 
+                        ratioB: shrinkPercent, 
+                        statusB: status_B, 
+                        scoreC: isBadC ? 1 : 0, 
+                        statusC: status_C 
+                    };
+
+                    let colorA;
+                    if (diff_A >= THRESHOLD_A) {
+                        colorA = "#ff4d4d";
+                    } else {
+                        colorA = "#4cd964";
+                    }
+
+                    let colorB;
+                    if (shrinkRatio >= THRESHOLD_B_SHRINK) {
+                        colorB = "#ff4d4d";
+                    } else {
+                        colorB = "#4cd964";
+                    }
+
+                    let colorC;
+                    if (isBadC) {
+                        colorC = "#ff4d4d";
+                    } else {
+                        colorC = "#4cd964";
+                    }
+
+                    let testStatusStr;
+                    if (isTesting) {
+                        testStatusStr = "🔴 [測驗進行中 - 可隨時重新校準]";
+                    } else {
+                        testStatusStr = "⏸️ [校準完成，請點擊開始]";
+                    }
+
+                    statusText.innerHTML = `
+                        <span style="font-size:0.85rem;">${testStatusStr}</span><br>
+                        <span style="color:${colorA}">[A] 頸部變化: +${diff_A}°</span><br>
+                        <span style="color:${colorB}">[B] 聳肩幅度: ${shrinkPercent}%</span><br>
+                        <span style="color:${colorC}">[C] 綜合狀態: ${status_C}</span>
+                    `;
+                }
             } else {
-                statusText.innerHTML = "請側身面對鏡頭";
+                statusText.innerHTML = "未偵測到身體，請調整 iPad 角度面對鏡頭";
             }
             canvasCtx.restore();
         }
 
-        function drawCircle(x, y, color) {
+        function triggerCalibration() {
+            if (window.tempA !== undefined && window.tempDistB !== undefined) {
+                baselineA = window.tempA;
+                baselineEarShoulderDist = window.tempDistB;
+                isCalibrated = true;
+                
+                startTestBtn.disabled = false;
+                // 💡 點擊校準時鎖定慣用手選單與姓名輸入，避免測試中途被更改
+                userNameInput.disabled = true;
+                handednessSelect.disabled = true;
+
+                csvRecords = [["Timestamp", "Name", "Handedness", "Test_A_Diff", "Status_A", "Test_B_ShrungRatio", "Status_B", "Test_C_Score", "Status_C", "Overall_Result"]];
+
+                let handText;
+                if (handednessSelect.value === 'right') {
+                    handText = "右手 (側向左，測左側)";
+                } else {
+                    handText = "左手 (側向右，測右側)";
+                }
+
+                const nameVal = userNameInput.value.trim() || "受測者";
+                log(`【重新校準成功】受測者：${nameVal} | 慣用手：${handText} | 新基準 A: ${baselineA.toFixed(1)}°, 新基準距: ${baselineEarShoulderDist.toFixed(1)}px (已清空舊數據)`);
+            } else {
+                alert("尚未偵測到身體關節，請坐在鏡頭前再試一次！");
+            }
+        }
+
+        calibBtn.addEventListener('click', triggerCalibration);
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'c' || e.key === 'C') {
+                triggerCalibration();
+            }
+        });
+
+        function exportCsvFile() {
+            if (csvRecords.length <= 1) {
+                alert("目前尚無累積數據！");
+                return;
+            }
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvRecords.map(e => e.join(",")).join("\n");
+            const link = document.createElement('a');
+            link.href = encodeURI(csvContent);
+            
+            const rawName = userNameInput.value.trim() || "User";
+            const safeName = rawName.replace(/[/\\?%*:|"<>]/g, "_");
+
+            const nowStr = getFormattedDateTime().replace(/[: ]/g, "_");
+            link.download = `${safeName}_${nowStr}.csv`;
+            link.click();
+            log(`【成功】CSV 檔案已手動下載：${safeName}_${nowStr}.csv`);
+        }
+
+        startTestBtn.addEventListener('click', () => {
+            if (!isCalibrated) return;
+            isTesting = true;
+            startTestBtn.style.display = 'none';
+            stopTestBtn.style.display = 'inline-block';
+
+            log(`【測試開始】每 5 秒記錄 A(烏龜頸)、B(聳肩) 測試結果；任一項異常即發出嗶聲！(支援隨時點擊「坐姿校準」更新基準)`);
+
+            if (autoRecordTimer) clearInterval(autoRecordTimer);
+            autoRecordTimer = setInterval(() => {
+                if (isTesting && isCalibrated) {
+                    const now = new Date();
+                    const currentHour = now.getHours();
+
+                    if (currentHour >= 6 && currentHour < 23) {
+                        const fullDateTime = getFormattedDateTime();
+                        const nameVal = userNameInput.value.trim() || "User";
+                        
+                        let handVal;
+                        if (handednessSelect.value === 'right') {
+                            handVal = "右手(側左)";
+                        } else {
+                            handVal = "左手(側右)";
+                        }
+
+                        const isBadA = currentData.statusA.includes("Warning");
+                        const isBadB = currentData.statusB.includes("Warning");
+                        
+                        let overallResult = "Good (良好)";
+                        if (isBadA || isBadB) {
+                            overallResult = "Bad (不良)";
+                        }
+
+                        csvRecords.push([
+                            fullDateTime, 
+                            nameVal,
+                            handVal,
+                            currentData.diffA, 
+                            currentData.statusA, 
+                            currentData.ratioB + "%", 
+                            currentData.statusB, 
+                            currentData.scoreC, 
+                            currentData.statusC,
+                            overallResult
+                        ]);
+
+                        if (overallResult.includes("Bad")) {
+                            playBeepSound();
+                            log(`⚠️ [自動紀錄 & 警示] ${fullDateTime} 偵測到不良姿勢！(烏龜頸: +${currentData.diffA}°, 聳肩: ${currentData.ratioB}%) 已發出嗶聲。`);
+                        } else {
+                            log(`[自動紀錄] ${fullDateTime} ➔ 烏龜頸: +${currentData.diffA}°, 聳肩: ${currentData.ratioB}% (正常)`);
+                        }
+
+                    } else {
+                        log(`[防呆攔截] 當前時間 ${currentHour}:00 非測試時段 (06:00~23:00)，暫停記錄。`);
+                    }
+                }
+            }, 5000);
+        });
+
+        stopTestBtn.disabled = false;
+        stopTestBtn.addEventListener('click', () => {
+            isTesting = false;
+            stopTestBtn.style.display = 'none';
+            startTestBtn.style.display = 'inline-block';
+            
+            // 💡 點擊「停止測試」後，解鎖姓名輸入框與慣用手選單，方便下一位學生重新設定
+            userNameInput.disabled = false;
+            handednessSelect.disabled = false;
+            isCalibrated = false; // 重置校準狀態，強制下一位學生重新校準
+            startTestBtn.disabled = true; // 需重新校準後才能再次點擊開始
+
+            if (autoRecordTimer) clearInterval(autoRecordTimer);
+
+            log(`【測試停止】已解鎖姓名與慣用手設定。請為下一位同學輸入資料並重新點擊校準。`);
+        });
+
+        function drawCircle(x, y, radius, color) {
             canvasCtx.fillStyle = color;
             canvasCtx.beginPath();
-            canvasCtx.arc(x, y, 6, 0, 2 * Math.PI);
+            canvasCtx.arc(x, y, radius, 0, 2 * Math.PI);
             canvasCtx.fill();
         }
 
@@ -252,51 +549,8 @@
             canvasCtx.stroke();
         }
 
-        // 倒數拍照
-        captureBtn.addEventListener('click', () => {
-            if (isCountingDown) return;
-            isCountingDown = true;
-            let count = 3;
-            countdownDiv.style.display = 'block';
-            countdownDiv.innerText = count;
+        downloadCsvBtn.addEventListener('click', exportCsvFile);
 
-            let timer = setInterval(() => {
-                count--;
-                if (count > 0) {
-                    countdownDiv.innerText = count;
-                } else {
-                    clearInterval(timer);
-                    countdownDiv.style.display = 'none';
-                    isCountingDown = false;
-                    
-                    // 下載圖片
-                    const link = document.createElement('a');
-                    link.download = `posture_${Date.now()}.jpg`;
-                    link.href = canvasElement.toDataURL('image/jpeg');
-                    link.click();
-
-                    // 記錄 CSV
-                    csvRecords.push([new Date().toLocaleString(), currentData.a, currentData.statusA, currentData.b, currentData.statusB, currentData.c, currentData.statusC]);
-                    log("拍照成功並已記錄數據！");
-                }
-            }, 1000);
-        });
-
-        // 下載 CSV
-        downloadCsvBtn.addEventListener('click', () => {
-            if (csvRecords.length <= 1) {
-                alert("目前沒有數據！");
-                return;
-            }
-            let csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvRecords.map(e => e.join(",")).join("\n");
-            const link = document.createElement('a');
-            link.href = encodeURI(csvContent);
-            link.download = `data_${Date.now()}.csv`;
-            link.click();
-            log("CSV 下載成功！");
-        });
-
-        // 啟動
         startCamera();
     </script>
 </body>
