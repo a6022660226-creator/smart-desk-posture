@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>科展姿勢檢測系統（iPad 版）</title>
+    <!-- 載入 MediaPipe Pose -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body {
+            font-family: sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 { font-size: 1.3rem; margin-bottom: 5px; text-align: center; }
+        .subtitle { font-size: 0.8rem; color: #aaa; margin-bottom: 10px; text-align: center; }
+        
+        .container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        
+        video { display: none; }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            transform: scaleX(-1); /* 水平鏡像 */
+        }
+        
+        .overlay-ui {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            text-align: right;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+        }
+        
+        .countdown-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 3.5rem;
+            font-weight: bold;
+            color: #00ffff;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            display: none;
+        }
+
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            padding: 10px 18px;
+            font-size: 0.95rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #fff;
+        }
+        .btn-capture { background-color: #007aff; }
+        .btn-csv { background-color: #34c759; }
+
+        .log-box {
+            margin-top: 10px;
+            width: 100%;
+            max-width: 600px;
+            background: #1e1e1e;
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            max-height: 80px;
+            overflow-y: auto;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>智慧型姿勢檢測系統</h1>
+    <div class="subtitle">iPad / 網頁版</div>
+
+    <div class="container">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+        <div class="overlay-ui" id="statusText">初始化 AI 模型中...</div>
+        <div class="countdown-overlay" id="countdownDiv">3</div>
+    </div>
+
+    <div class="controls">
+        <button class="btn-capture" id="captureBtn">📷 3秒倒數截圖</button>
+        <button class="btn-csv" id="downloadCsvBtn">📊 下載 CSV</button>
+    </div>
+
+    <div class="log-box" id="logBox">系統日誌：等待啟動...</div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusText = document.getElementById('statusText');
+        const countdownDiv = document.getElementById('countdownDiv');
+        const captureBtn = document.getElementById('captureBtn');
+        const downloadCsvBtn = document.getElementById('downloadCsvBtn');
+        const logBox = document.getElementById('logBox');
+
+        let csvRecords = [["Timestamp", "Angle_A", "Status_A", "Angle_B", "Status_B", "Total_C", "Status_C"]];
+        let currentData = { a: 0, statusA: "Waiting", b: 0, statusB: "Waiting", c: 0, statusC: "Waiting" };
+        let isCountingDown = false;
+
+        function log(msg) {
+            logBox.innerHTML += `<br>${msg}`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // 初始化 MediaPipe
+        const pose = new Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        });
+
+        pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        pose.onResults(onResults);
+
+        // 使用標準 HTML5 視訊串流啟動相機（對 iPad 相容性最高）
+        async function startCamera() {
+            try {
+                log("正在請求相機權限...");
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                videoElement.srcObject = stream;
+                await videoElement.play();
+                log("相機啟動成功！開始偵測姿勢...");
+                
+                // 開始影格循環
+                requestAnimationFrame(sendVideoFrame);
+            } catch (err) {
+                log("【錯誤】無法啟動相機：" + err.message);
+                statusText.innerHTML = "相機啟動失敗，請檢查權限";
+            }
+        }
+
+        async function sendVideoFrame() {
+            if (videoElement.readyState >= 2) {
+                await pose.send({ image: videoElement });
+            }
+            requestAnimationFrame(sendVideoFrame);
+        }
+
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            const w = canvasElement.width;
+            const h = canvasElement.height;
+
+            if (results.poseLandmarks) {
+                const landmarks = results.poseLandmarks;
+                const ear = landmarks[8], shoulder = landmarks[12], hip = landmarks[24], nose = landmarks[0];
+
+                const ear_x = ear.x * w, ear_y = ear.y * h;
+                const shoulder_x = shoulder.x * w, shoulder_y = shoulder.y * h;
+                const hip_x = hip.x * w, hip_y = hip.y * h;
+                const nose_x = nose.x * w, nose_y = nose.y * h;
+
+                // 簡單馬賽克
+                let min_x = Math.min(nose_x, ear_x), max_x = Math.max(nose_x, ear_x);
+                let hx1 = Math.max(0, Math.floor(min_x - 30)), hx2 = Math.min(w, Math.ceil(max_x + 30));
+                let base_y = Math.min(nose_y, ear_y);
+                let hy1 = Math.max(0, Math.floor(base_y - 70)), hy2 = Math.min(h, Math.ceil(base_y + 60));
+                let fw = hx2 - hx1, fh = hy2 - hy1;
+                
+                if (fw > 0 && fh > 0) {
+                    canvasCtx.imageSmoothingEnabled = false;
+                    canvasCtx.drawImage(canvasElement, hx1, hy1, fw, fh, hx1, hy1, 10, 10);
+                    canvasCtx.drawImage(canvasElement, hx1, hy1, 10, 10, hx1, hy1, fw, fh);
+                    canvasCtx.imageSmoothingEnabled = true;
+                }
+
+                // 角度計算
+                let dx_a = ear_x - shoulder_x, dy_a = shoulder_y - ear_y;
+                let angle_A = Math.round((Math.atan2(Math.abs(dx_a), dy_a !== 0 ? Math.abs(dy_a) : 1) * 180 / Math.PI) * 10) / 10;
+                let status_A = angle_A < 15 ? "Normal" : "Warning";
+
+                let dx_b = shoulder_x - hip_x, dy_b = hip_y - shoulder_y;
+                let angle_B = Math.round((Math.atan2(Math.abs(dx_b), dy_b !== 0 ? Math.abs(dy_b) : 1) * 180 / Math.PI) * 10) / 10;
+                let status_B = angle_B < 12 ? "Normal" : "Warning";
+
+                let total_C = Math.round((angle_A + angle_B) * 10) / 10;
+                let status_C = total_C < 25 ? "Good" : "Bad";
+
+                currentData = { a: angle_A, statusA: status_A, b: angle_B, statusB: status_B, c: total_C, statusC: status_C };
+
+                // 畫點與線
+                drawCircle(ear_x, ear_y, "#ff0000");
+                drawCircle(shoulder_x, shoulder_y, "#0000ff");
+                drawCircle(hip_x, hip_y, "#00ffff");
+                drawLine(shoulder_x, shoulder_y, ear_x, ear_y, "#00ff00", 2);
+                drawLine(hip_x, hip_y, shoulder_x, shoulder_y, "#ff00ff", 2);
+
+                statusText.innerHTML = `[A] Ear-Shd: ${angle_A}°<br>[B] Shd-Hip: ${angle_B}°<br>[C] Total: ${total_C}°`;
+            } else {
+                statusText.innerHTML = "請側身面對鏡頭";
+            }
+            canvasCtx.restore();
+        }
+
+        function drawCircle(x, y, color) {
+            canvasCtx.fillStyle = color;
+            canvasCtx.beginPath();
+            canvasCtx.arc(x, y, 6, 0, 2 * Math.PI);
+            canvasCtx.fill();
+        }
+
+        function drawLine(x1, y1, x2, y2, color, width) {
+            canvasCtx.strokeStyle = color;
+            canvasCtx.lineWidth = width;
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(x1, y1);
+            canvasCtx.lineTo(x2, y2);
+            canvasCtx.stroke();
+        }
+
+        // 倒數拍照
+        captureBtn.addEventListener('click', () => {
+            if (isCountingDown) return;
+            isCountingDown = true;
+            let count = 3;
+            countdownDiv.style.display = 'block';
+            countdownDiv.innerText = count;
+
+            let timer = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownDiv.innerText = count;
+                } else {
+                    clearInterval(timer);
+                    countdownDiv.style.display = 'none';
+                    isCountingDown = false;
+                    
+                    // 下載圖片
+                    const link = document.createElement('a');
+                    link.download = `posture_${Date.now()}.jpg`;
+                    link.href = canvasElement.toDataURL('image/jpeg');
+                    link.click();
+
+                    // 記錄 CSV
+                    csvRecords.push([new Date().toLocaleString(), currentData.a, currentData.statusA, currentData.b, currentData.statusB, currentData.c, currentData.statusC]);
+                    log("拍照成功並已記錄數據！");
+                }
+            }, 1000);
+        });
+
+        // 下載 CSV
+        downloadCsvBtn.addEventListener('click', () => {
+            if (csvRecords.length <= 1) {
+                alert("目前沒有數據！");
+                return;
+            }
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvRecords.map(e => e.join(",")).join("\n");
+            const link = document.createElement('a');
+            link.href = encodeURI(csvContent);
+            link.download = `data_${Date.now()}.csv`;
+            link.click();
+            log("CSV 下載成功！");
+        });
+
+        // 啟動
+        startCamera();
+    </script>
+</body>
+</html>
