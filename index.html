@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>科展姿勢檢測系統（支援隨時重新選擇慣用手）</title>
+    <title>科展姿勢檢測系統（橫豎屏自適應防拉扯版）</title>
     <!-- 載入 MediaPipe Pose -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
@@ -20,25 +20,31 @@
             flex-direction: column;
             align-items: center;
         }
-        h1 { font-size: 1.2rem; margin-bottom: 3px; text-align: center; }
+        h1 { font-size: 1.1rem; margin-bottom: 3px; text-align: center; }
         .subtitle { font-size: 0.75rem; color: #aaa; margin-bottom: 8px; text-align: center; }
         
         .container {
             position: relative;
             width: 100%;
-            max-width: 850px; 
-            aspect-ratio: 16 / 9;
+            max-width: 650px; 
+            /* 📱 智慧自適應：橫屏時維持寬扁，豎屏時自動拉高，絕不變形拉扯 */
+            aspect-ratio: auto;
             background: #000;
             border-radius: 10px;
             overflow: hidden;
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         
         video { display: none; }
         canvas {
             display: block;
             width: 100%;
-            height: 100%;
+            height: auto;
+            max-height: 75vh;
+            object-fit: contain; /* 確保相機畫面維持原本比例，不裁切、不拉扯 */
             transform: scaleX(-1); /* 水平鏡像 */
         }
         
@@ -106,12 +112,12 @@
         .log-box {
             margin-top: 8px;
             width: 100%;
-            max-width: 850px;
+            max-width: 650px;
             background: #1e1e1e;
             padding: 8px;
             border-radius: 6px;
             font-size: 0.75rem;
-            max-height: 90px;
+            max-height: 80px;
             overflow-y: auto;
             color: #ccc;
         }
@@ -119,8 +125,8 @@
 </head>
 <body>
 
-    <h1>智慧型姿勢檢測系統（慣用手自由切換版）</h1>
-    <div class="subtitle">停止測試後可重新選擇慣用手與姓名 | 測試中可隨時重新校準 | 異常即發出嗶聲</div>
+    <h1>智慧型姿勢檢測系統（橫豎屏自適應版）</h1>
+    <div class="subtitle">支援橫屏/豎屏自動適應不拉扯 | 停止測試可重選慣用手 | 隨時可重新校準</div>
 
     <div class="container">
         <video id="webcam" autoplay playsinline muted></video>
@@ -150,7 +156,7 @@
         <button class="btn-csv" id="downloadCsvBtn">📊 手動下載 CSV</button>
     </div>
 
-    <div class="log-box" id="logBox">系統日誌：請選擇慣用手，將 iPad 架在皮套上，輸入姓名後坐端正點擊「坐姿校準」。</div>
+    <div class="log-box" id="logBox">系統日誌：請選擇慣用手，將手機/iPad擺放好，輸入姓名後坐端正點擊「坐姿校準」。</div>
 
     <script>
         const videoElement = document.getElementById('webcam');
@@ -386,9 +392,9 @@
 
                     let testStatusStr;
                     if (isTesting) {
-                        testStatusStr = "🔴 [測驗進行中 - 可隨時重新校準]";
+                        testStatusStr = "🔴 [測驗進行中]";
                     } else {
-                        testStatusStr = "⏸️ [校準完成，請點擊開始]";
+                        testStatusStr = "⏸️ [校準完成]";
                     }
 
                     statusText.innerHTML = `
@@ -399,7 +405,7 @@
                     `;
                 }
             } else {
-                statusText.innerHTML = "未偵測到身體，請調整 iPad 角度面對鏡頭";
+                statusText.innerHTML = "未偵測到身體，請調整相機角度";
             }
             canvasCtx.restore();
         }
@@ -411,21 +417,14 @@
                 isCalibrated = true;
                 
                 startTestBtn.disabled = false;
-                // 💡 點擊校準時鎖定慣用手選單與姓名輸入，避免測試中途被更改
                 userNameInput.disabled = true;
                 handednessSelect.disabled = true;
 
                 csvRecords = [["Timestamp", "Name", "Handedness", "Test_A_Diff", "Status_A", "Test_B_ShrungRatio", "Status_B", "Test_C_Score", "Status_C", "Overall_Result"]];
 
-                let handText;
-                if (handednessSelect.value === 'right') {
-                    handText = "右手 (側向左，測左側)";
-                } else {
-                    handText = "左手 (側向右，測右側)";
-                }
-
+                let handText = handednessSelect.value === 'right' ? "右手(側左)" : "左手(側右)";
                 const nameVal = userNameInput.value.trim() || "受測者";
-                log(`【重新校準成功】受測者：${nameVal} | 慣用手：${handText} | 新基準 A: ${baselineA.toFixed(1)}°, 新基準距: ${baselineEarShoulderDist.toFixed(1)}px (已清空舊數據)`);
+                log(`【重新校準成功】受測者：${nameVal} | 慣用手：${handText}`);
             } else {
                 alert("尚未偵測到身體關節，請坐在鏡頭前再試一次！");
             }
@@ -433,9 +432,7 @@
 
         calibBtn.addEventListener('click', triggerCalibration);
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'c' || e.key === 'C') {
-                triggerCalibration();
-            }
+            if (e.key === 'c' || e.key === 'C') triggerCalibration();
         });
 
         function exportCsvFile() {
@@ -449,11 +446,10 @@
             
             const rawName = userNameInput.value.trim() || "User";
             const safeName = rawName.replace(/[/\\?%*:|"<>]/g, "_");
-
             const nowStr = getFormattedDateTime().replace(/[: ]/g, "_");
             link.download = `${safeName}_${nowStr}.csv`;
             link.click();
-            log(`【成功】CSV 檔案已手動下載：${safeName}_${nowStr}.csv`);
+            log(`【成功】CSV 檔案已下載`);
         }
 
         startTestBtn.addEventListener('click', () => {
@@ -462,55 +458,31 @@
             startTestBtn.style.display = 'none';
             stopTestBtn.style.display = 'inline-block';
 
-            log(`【測試開始】每 5 秒記錄 A(烏龜頸)、B(聳肩) 測試結果；任一項異常即發出嗶聲！(支援隨時點擊「坐姿校準」更新基準)`);
+            log(`【測試開始】每 5 秒自動記錄數據...`);
 
             if (autoRecordTimer) clearInterval(autoRecordTimer);
             autoRecordTimer = setInterval(() => {
                 if (isTesting && isCalibrated) {
-                    const now = new Date();
-                    const currentHour = now.getHours();
+                    const fullDateTime = getFormattedDateTime();
+                    const nameVal = userNameInput.value.trim() || "User";
+                    let handVal = handednessSelect.value === 'right' ? "右手(側左)" : "左手(側右)";
 
-                    if (currentHour >= 6 && currentHour < 23) {
-                        const fullDateTime = getFormattedDateTime();
-                        const nameVal = userNameInput.value.trim() || "User";
-                        
-                        let handVal;
-                        if (handednessSelect.value === 'right') {
-                            handVal = "右手(側左)";
-                        } else {
-                            handVal = "左手(側右)";
-                        }
+                    const isBadA = currentData.statusA.includes("Warning");
+                    const isBadB = currentData.statusB.includes("Warning");
+                    let overallResult = (isBadA || isBadB) ? "Bad (不良)" : "Good (良好)";
 
-                        const isBadA = currentData.statusA.includes("Warning");
-                        const isBadB = currentData.statusB.includes("Warning");
-                        
-                        let overallResult = "Good (良好)";
-                        if (isBadA || isBadB) {
-                            overallResult = "Bad (不良)";
-                        }
+                    csvRecords.push([
+                        fullDateTime, nameVal, handVal,
+                        currentData.diffA, currentData.statusA, 
+                        currentData.ratioB + "%", currentData.statusB, 
+                        currentData.scoreC, currentData.statusC, overallResult
+                    ]);
 
-                        csvRecords.push([
-                            fullDateTime, 
-                            nameVal,
-                            handVal,
-                            currentData.diffA, 
-                            currentData.statusA, 
-                            currentData.ratioB + "%", 
-                            currentData.statusB, 
-                            currentData.scoreC, 
-                            currentData.statusC,
-                            overallResult
-                        ]);
-
-                        if (overallResult.includes("Bad")) {
-                            playBeepSound();
-                            log(`⚠️ [自動紀錄 & 警示] ${fullDateTime} 偵測到不良姿勢！(烏龜頸: +${currentData.diffA}°, 聳肩: ${currentData.ratioB}%) 已發出嗶聲。`);
-                        } else {
-                            log(`[自動紀錄] ${fullDateTime} ➔ 烏龜頸: +${currentData.diffA}°, 聳肩: ${currentData.ratioB}% (正常)`);
-                        }
-
+                    if (overallResult.includes("Bad")) {
+                        playBeepSound();
+                        log(`⚠️ [警告] ${fullDateTime} 偵測到不良姿勢！已發出嗶聲。`);
                     } else {
-                        log(`[防呆攔截] 當前時間 ${currentHour}:00 非測試時段 (06:00~23:00)，暫停記錄。`);
+                        log(`[紀錄] ${fullDateTime} ➔ 姿勢正常`);
                     }
                 }
             }, 5000);
@@ -522,15 +494,13 @@
             stopTestBtn.style.display = 'none';
             startTestBtn.style.display = 'inline-block';
             
-            // 💡 點擊「停止測試」後，解鎖姓名輸入框與慣用手選單，方便下一位學生重新設定
             userNameInput.disabled = false;
             handednessSelect.disabled = false;
-            isCalibrated = false; // 重置校準狀態，強制下一位學生重新校準
-            startTestBtn.disabled = true; // 需重新校準後才能再次點擊開始
+            isCalibrated = false;
+            startTestBtn.disabled = true;
 
             if (autoRecordTimer) clearInterval(autoRecordTimer);
-
-            log(`【測試停止】已解鎖姓名與慣用手設定。請為下一位同學輸入資料並重新點擊校準。`);
+            log(`【測試停止】已解鎖姓名與慣用手設定。`);
         });
 
         function drawCircle(x, y, radius, color) {
@@ -550,7 +520,6 @@
         }
 
         downloadCsvBtn.addEventListener('click', exportCsvFile);
-
         startCamera();
     </script>
 </body>
